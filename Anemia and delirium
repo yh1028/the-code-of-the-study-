@@ -1,0 +1,62 @@
+library(data.table)
+library(mr.raps)
+library(ieugwasr)
+library(MendelianRandomization)
+library(MRPRESSO)
+library(data.table)
+library(TwoSampleMR)
+####Setting the Exposure ID
+ID_exposure=c('ebi-a-GCST90018872','ebi-a-GCST90018794')
+
+ex_dat=extract_instruments(outcomes = 'ebi-a-GCST90018794',p1 = 5e-06) #extract IV about exposure
+
+
+download.file(url='https://storage.googleapis.com/finngen-public-data-r9/summary_stats/finngen_R9_F5_DELIRIUM.gz',
+              destfile='D:finngen_R10_F5_DELIRIUM.gz')###download data of outcome 
+
+
+out_dat<-read_outcome_data(
+  filename ='D:finngen_R10_F5_DELIRIUM.gz',#read outcome data
+  snps =ex_dat$SNP,
+  sep= "\t",
+  snp_col = "rsids",
+  beta_col = "beta",
+  se_col = "sebeta",
+  effect_allele_col ="alt",
+  other_allele_col = "ref",
+  eaf_col = "af_alt",
+  pval_col = "pval",
+  chr_col = "#chrom",
+  pos_col = "pos")
+
+mrdata<-harmonise_data(exposure_dat=ex_dat, outcome_dat=out_dat, action = 2)###harmonise
+
+
+######Instrumental variables R2 and F calculated
+mrdata$r2=2*mrdata$eaf.exposure*(1-mrdata$eaf.exposure)*mrdata$beta.exposure^2
+mrdata$f=(mrdata$samplesize.exposure-2)*mrdata$r2/(1-mrdata$r2)
+sum(mrdata$r2)
+mean(mrdata$f)
+mrdata=subset(mrdata,f>=10)
+
+
+####MR analysis 
+
+mr_allmethods(mr_input(bx =mrdata$beta.exposure, bxse =mrdata$se.exposure, by = mrdata$beta.outcome, byse =mrdata$se.outcome), 
+              method="main", iterations =10000)###IVW ,MR Egger, Weighted median, Simple median
+
+
+mr_mbe(mr_input(bx =mrdata$beta.exposure, bxse =mrdata$se.exposure, by = mrdata$beta.outcome, byse =mrdata$se.outcome),
+       weighting="weighted", stderror="delta", iterations=10000)###Weighted mode
+
+
+attach(mrdata)
+mr.raps(beta.exposure, beta.outcome, se.exposure, se.outcome,over.dispersion = F, loss.function = "tukey")#######MR RAPS
+
+
+x<-mr_leaveoneout(mrdata)
+mr_leaveoneout_plot(x)    #leave-one-out analysis,
+
+run_mr_presso(mrdata, NbDistribution = 1000, SignifThreshold = 0.05)####MRPRESSO
+
+mr_heterogeneity(mrdata,method_list ='mr_ivw')#### Cochran Q test
